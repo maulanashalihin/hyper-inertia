@@ -1,0 +1,55 @@
+{
+  "name": "@laju/hyper-inertia",
+  "version": "1.0.0",
+  "publishConfig": {
+    "access": "public"
+  },
+  "description": "Inertia.js v3 server-side adapter for HyperExpress — native, no adaptor bridge. Implements the Inertia protocol (auto-detect, asset versioning, partial reloads, shared props, external redirects).",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/maulanashalihin/hyper-inertia.git"
+  },
+  "homepage": "https://github.com/maulanashalihin/hyper-inertia#readme",
+  "bugs": {
+    "url": "https://github.com/maulanashalihin/hyper-inertia/issues"
+  },
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsup src/index.ts --format esm,cjs --dts --clean",
+    "dev": "tsup src/index.ts --format esm,cjs --dts --watch",
+    "test": "vitest run",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "inertia",
+    "inertiajs",
+    "hyper-express",
+    "inertia-adapter",
+    "spa"
+  ],
+  "author": "Maulana Shalihin",
+  "license": "MIT",
+  "peerDependencies": {
+    "hyper-express": ">=6.0.0"
+  },
+  "devDependencies": {
+    "hyper-express": "^6.17.3",
+    "tsup": "^8.4.0",
+    "typescript": "^5.8.0",
+    "vitest": "^4.1.2"
+  }
+}
