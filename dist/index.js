@@ -199,7 +199,10 @@ var Inertia = class {
   renderJSON(res, page) {
     res.setHeader("X-Inertia", "true");
     res.setHeader("X-Inertia-Version", this.version);
-    res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, private");
+    res.setHeader(
+      "Cache-Control",
+      "no-store, no-cache, must-revalidate, private"
+    );
     res.setHeader("Vary", "X-Inertia");
     return res.json(page);
   }
@@ -215,8 +218,14 @@ var Inertia = class {
     }
     const jsonStr = escapeHtml(JSON.stringify(page));
     const title = extractTitle(page.props);
-    const html = DEFAULT_ROOT_TEMPLATE.replace("%s", title).replace("%s", jsonStr);
-    res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, private");
+    const html = DEFAULT_ROOT_TEMPLATE.replace("%s", title).replace(
+      "%s",
+      jsonStr
+    );
+    res.setHeader(
+      "Cache-Control",
+      "no-store, no-cache, must-revalidate, private"
+    );
     res.setHeader("Vary", "X-Inertia");
     res.setHeader("Content-Type", "text/html; charset=utf-8");
     return res.send(html);

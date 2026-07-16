@@ -172,7 +172,7 @@ declare function isPartialRequest(req: Request, component: string): boolean;
 declare function filterPartialProps(props: Record<string, unknown>, req: Request): Record<string, unknown>;
 
 /**
- * @laju/hyper-inertia — Inertia.js v3 server-side adapter for HyperExpress.
+ * @maulanashalihin/hyper-inertia — Inertia.js v3 server-side adapter for HyperExpress.
  *
  * Implements the Inertia protocol natively on HyperExpress:
  *   - Auto-detects Inertia XHR vs initial full-page loads
@@ -184,7 +184,7 @@ declare function filterPartialProps(props: Record<string, unknown>, req: Request
  *
  * @example
  * ```ts
- * import { Inertia } from "@laju/hyper-inertia";
+ * import { Inertia } from "@maulanashalihin/hyper-inertia";
  *
  * const inertia = new Inertia({ version: "1.0" });
  *

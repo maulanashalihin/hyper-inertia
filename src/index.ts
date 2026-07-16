@@ -1,5 +1,5 @@
 /**
- * @laju/hyper-inertia — Inertia.js v3 server-side adapter for HyperExpress.
+ * @maulanashalihin/hyper-inertia — Inertia.js v3 server-side adapter for HyperExpress.
  *
  * Implements the Inertia protocol natively on HyperExpress:
  *   - Auto-detects Inertia XHR vs initial full-page loads
@@ -11,7 +11,7 @@
  *
  * @example
  * ```ts
- * import { Inertia } from "@laju/hyper-inertia";
+ * import { Inertia } from "@maulanashalihin/hyper-inertia";
  *
  * const inertia = new Inertia({ version: "1.0" });
  *

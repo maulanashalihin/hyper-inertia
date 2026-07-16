@@ -1,4 +1,4 @@
-# @laju/hyper-inertia
+# @maulanashalihin/hyper-inertia
 
 **Inertia.js v3 server-side adapter for HyperExpress** — native middleware, no adaptor bridge.
 
@@ -24,13 +24,13 @@ Supports **Inertia v3 protocol**: asset versioning, partial reloads, shared prop
 ## Installation
 
 ```bash
-npm install @laju/hyper-inertia
+npm install @maulanashalihin/hyper-inertia
 ```
 
 ## Quick Start
 
 ```ts
-import { Inertia } from "@laju/hyper-inertia";
+import { Inertia } from "@maulanashalihin/hyper-inertia";
 import HyperExpress from "hyper-express";
 
 const server = new HyperExpress.Server();
