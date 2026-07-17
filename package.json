@@ -1,9 +1,6 @@
 {
-  "name": "@maulanashalihin/hyper-inertia",
-  "version": "1.0.0",
-  "publishConfig": {
-    "access": "public"
-  },
+  "name": "hyper-express-inertia",
+  "version": "1.2.0",
   "description": "Inertia.js v3 server-side adapter for HyperExpress — native, no adaptor bridge. Implements the Inertia protocol (auto-detect, asset versioning, partial reloads, shared props, external redirects).",
   "repository": {
     "type": "git",

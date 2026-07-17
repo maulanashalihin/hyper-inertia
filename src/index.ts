@@ -1,5 +1,5 @@
 /**
- * @maulanashalihin/hyper-inertia — Inertia.js v3 server-side adapter for HyperExpress.
+ * hyper-express-inertia — Inertia.js v3 server-side adapter for HyperExpress.
  *
  * Implements the Inertia protocol natively on HyperExpress:
  *   - Auto-detects Inertia XHR vs initial full-page loads
@@ -11,12 +11,9 @@
  *
  * @example
  * ```ts
- * import { Inertia } from "@maulanashalihin/hyper-inertia";
+ * import { Inertia } from "hyper-express-inertia";
  *
  * const inertia = new Inertia({ version: "1.0" });
- *
- * // As middleware
- * server.use(inertia.middleware());
  *
  * // In handlers
  * app.get("/", async (req, res) => {
@@ -26,7 +23,7 @@
  */
 
 import type { Request, Response } from "hyper-express";
-import type { InertiaConfig, Page, InertiaResponseExtensions } from "./types";
+import type { InertiaConfig, Page, ViteManifestEntry } from "./types";
 import { isPartialRequest, filterPartialProps } from "./partial";
 import { redirect, location, back } from "./redirect";
 
@@ -40,30 +37,6 @@ interface SharedProp {
 }
 
 // ---------------------------------------------------------------------------
-// Default root template
-// ---------------------------------------------------------------------------
-
-/**
- * Default HTML root template used when no custom render function is provided.
- *
- * Placeholders:
- *   %s — page title (from props["_title"] or "Inertia")
- *   %s — JSON-encoded page object (HTML-escaped for data-page attribute)
- */
-const DEFAULT_ROOT_TEMPLATE = `<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>%s - Inertia</title>
-</head>
-<body>
-    <div id="app" data-page='%s'></div>
-    <script type="module" src="/assets/main.js"></script>
-</body>
-</html>`;
-
-// ---------------------------------------------------------------------------
 // Inertia class
 // ---------------------------------------------------------------------------
 
@@ -71,7 +44,7 @@ const DEFAULT_ROOT_TEMPLATE = `<!DOCTYPE html>
  * Inertia adapter for HyperExpress.
  *
  * Create one via the constructor, register shared props, then use
- * `middleware()` and `render()` in your routes.
+ * `inertia.render()` and `inertia.flash()` in your handlers.
  */
 export class Inertia {
 	private version: string;
@@ -81,10 +54,24 @@ export class Inertia {
 		page: Page,
 	) => Promise<void> | void;
 	private sharedProps: SharedProp[] = [];
+	private title: string;
+	private favicon?: string;
+	private csrf?: boolean | ((req: Request) => string);
+	private devUrl?: string;
+	private manifest?: Record<string, ViteManifestEntry>;
+	private script: string;
+	private stylesheet?: string;
 
 	constructor(config: InertiaConfig = {}) {
 		this.version = config.version || "";
 		this.renderFunc = config.render;
+		this.title = config.title || "Inertia";
+		this.favicon = config.favicon;
+		this.csrf = config.csrf;
+		this.devUrl = config.devUrl;
+		this.manifest = config.manifest;
+		this.script = config.script || "/assets/main.js";
+		this.stylesheet = config.stylesheet;
 	}
 
 	// -----------------------------------------------------------------------
@@ -115,60 +102,6 @@ export class Inertia {
 		if (idx !== -1) {
 			this.sharedProps.splice(idx, 1);
 		}
-	}
-
-	// -----------------------------------------------------------------------
-	// Middleware
-	// -----------------------------------------------------------------------
-
-	/**
-	 * Returns a HyperExpress middleware handler that:
-	 *   1. Checks asset version (409 Conflict on mismatch)
-	 *   2. Sets Vary: X-Inertia header
-	 *   3. Attaches inertia/flash/redirect helpers to the response object
-	 */
-	middleware(): (req: Request, res: Response) => Promise<void> | void {
-		return (req: Request, res: Response) => {
-			// --- Version check ---
-			if (this.version && req.header("X-Inertia") === "true") {
-				const clientVersion = req.header("X-Inertia-Version");
-				if (clientVersion && clientVersion !== this.version) {
-					res.setHeader("X-Inertia-Location", req.url || "/");
-					res.status(409).send();
-					return;
-				}
-			}
-
-			// --- Attach helpers to response ---
-
-			// Flash message
-			(res as unknown as InertiaResponseExtensions).flash = (
-				type: string,
-				message: string,
-				ttl = 3000,
-			): Response => {
-				// HyperExpress cookie format: name, value, maxAge (ms)
-				// We use the cookie helper from hyper-express
-				(res as any).cookie(type, message, ttl);
-				return res;
-			};
-
-			// Redirect — wraps the redirect helper
-			(res as unknown as InertiaResponseExtensions).redirect = (
-				url: string,
-				status = 303,
-			): Response => {
-				return res.status(status).setHeader("Location", url).send();
-			};
-
-			// Inertia render method
-			(res as unknown as InertiaResponseExtensions).inertia = async (
-				component: string,
-				inertiaProps: Record<string, unknown> = {},
-			): Promise<unknown> => {
-				return this.render(req, res, component, inertiaProps);
-			};
-		};
 	}
 
 	// -----------------------------------------------------------------------
@@ -267,6 +200,10 @@ export class Inertia {
 
 	/**
 	 * Render the root HTML page for initial full-page loads.
+	 * Uses Inertia v3 format:
+	 *   <div id="app"></div>
+	 *   <script data-page="app" type="application/json">{page}</script>
+	 *   <script type="module" src="..."></script>
 	 */
 	private async renderHTML(
 		req: Request,
@@ -277,13 +214,94 @@ export class Inertia {
 			return this.renderFunc(req, res, page);
 		}
 
-		const jsonStr = escapeHtml(JSON.stringify(page));
-		const title = extractTitle(page.props);
+		const pageJSON = JSON.stringify(page);
+		const pageTitle = extractTitle(page.props, this.title);
 
-		const html = DEFAULT_ROOT_TEMPLATE.replace("%s", title).replace(
-			"%s",
-			jsonStr,
+		// Resolve script/stylesheet URLs (dev vs production)
+		const isDev = !!this.devUrl;
+		const resolveAsset = (file: string): string => {
+			if (isDev) return `${this.devUrl}/${file}`;
+			const entry = this.manifest?.[file];
+			if (!entry) return "/" + file;
+			return "/" + entry.file;
+		};
+		const resolveCss = (file: string): string => {
+			if (isDev) return `${this.devUrl}/${file}`;
+			const entry = this.manifest?.[file];
+			if (entry?.css?.[0]) return "/" + entry.css[0];
+			return "/" + file;
+		};
+
+		// CSRF token
+		let csrfToken = "";
+		if (this.csrf === true) {
+			csrfToken = (req as any).csrf_token || "";
+		} else if (typeof this.csrf === "function") {
+			csrfToken = this.csrf(req);
+		}
+
+		// Build HTML
+		const headParts: string[] = [
+			'<meta charset="UTF-8">',
+			'<meta name="viewport" content="width=device-width, initial-scale=1.0">',
+		];
+
+		headParts.push(`<title>${escapeHtml(pageTitle)}</title>`);
+
+		if (this.favicon) {
+			headParts.push(
+				`<link rel="icon" type="image/x-icon" href="${escapeHtml(this.favicon)}">`,
+			);
+		}
+
+		if (csrfToken) {
+			headParts.push(
+				`<meta name="csrf-token" content="${escapeHtml(csrfToken)}">`,
+			);
+		}
+
+		// Vite client (dev only)
+		if (isDev) {
+			headParts.push(
+				`<script type="module" src="${this.devUrl}/@vite/client"></script>`,
+			);
+		}
+
+		const headHtml = headParts.join("\n\t\t");
+
+		// Build body parts (v3 format: empty div + JSON script + CSS + JS)
+		const bodyParts: string[] = [];
+
+		bodyParts.push('<div id="app"></div>');
+
+		// Inertia v3: page data in type="application/json" script tag
+		bodyParts.push(
+			`<script data-page="app" type="application/json">${pageJSON}</script>`,
 		);
+
+		// Stylesheet (between JSON data and JS for progressive loading)
+		if (this.stylesheet) {
+			bodyParts.push(
+				`<link rel="stylesheet" href="${escapeHtml(resolveCss(this.stylesheet))}">`,
+			);
+		}
+
+		// JS entry
+		bodyParts.push(
+			`<script type="module" src="${escapeHtml(resolveAsset(this.script))}"></script>`,
+		);
+
+		const bodyHtml = bodyParts.join("\n\t\t");
+
+		const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+		${headHtml}
+</head>
+<body>
+		${bodyHtml}
+</body>
+</html>`;
 
 		res.setHeader(
 			"Cache-Control",
@@ -292,6 +310,24 @@ export class Inertia {
 		res.setHeader("Vary", "X-Inertia");
 		res.setHeader("Content-Type", "text/html; charset=utf-8");
 		return res.send(html);
+	}
+
+	// -----------------------------------------------------------------------
+	// Flash helper
+	// -----------------------------------------------------------------------
+
+	/**
+	 * Set a flash message cookie (one-time read, 5s TTL).
+	 * The cookie is read by the Inertia client on the next request
+	 * and passed to the page component as the `flash` prop.
+	 *
+	 * @example
+	 * ```ts
+	 * inertia.flash(res, "error", "Invalid credentials");
+	 * ```
+	 */
+	flash(res: Response, type: string, message: string): void {
+		(res as any).cookie(type, message, 5000);
 	}
 
 	// -----------------------------------------------------------------------
@@ -339,22 +375,25 @@ function escapeHtml(str: string): string {
 
 /**
  * Extract the page title from props.
- * Checks "_title" key first, then "title", then falls back to "Inertia".
+ * Checks "_title" key first, then "title", then falls back to `fallback`.
  */
-function extractTitle(props: Record<string, unknown>): string {
+function extractTitle(
+	props: Record<string, unknown>,
+	fallback = "Inertia",
+): string {
 	for (const key of ["_title", "title"]) {
 		const v = props[key];
 		if (typeof v === "string" && v) return v;
 	}
-	return "Inertia";
+	return fallback;
 }
 
 // Re-export types and helpers
 export type {
 	Page,
 	InertiaConfig,
-	InertiaResponseExtensions,
 	SharedProp,
+	ViteManifestEntry,
 } from "./types";
 export { redirect, location, back, getReferer } from "./redirect";
 export { versionFromFile, versionFromEnv } from "./version";

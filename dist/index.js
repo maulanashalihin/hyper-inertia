@@ -65,25 +65,27 @@ function versionFromEnv(key) {
 }
 
 // src/index.ts
-var DEFAULT_ROOT_TEMPLATE = `<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>%s - Inertia</title>
-</head>
-<body>
-    <div id="app" data-page='%s'></div>
-    <script type="module" src="/assets/main.js"></script>
-</body>
-</html>`;
 var Inertia = class {
   version;
   renderFunc;
   sharedProps = [];
+  title;
+  favicon;
+  csrf;
+  devUrl;
+  manifest;
+  script;
+  stylesheet;
   constructor(config = {}) {
     this.version = config.version || "";
     this.renderFunc = config.render;
+    this.title = config.title || "Inertia";
+    this.favicon = config.favicon;
+    this.csrf = config.csrf;
+    this.devUrl = config.devUrl;
+    this.manifest = config.manifest;
+    this.script = config.script || "/assets/main.js";
+    this.stylesheet = config.stylesheet;
   }
   // -----------------------------------------------------------------------
   // Shared / global props
@@ -110,37 +112,6 @@ var Inertia = class {
     if (idx !== -1) {
       this.sharedProps.splice(idx, 1);
     }
-  }
-  // -----------------------------------------------------------------------
-  // Middleware
-  // -----------------------------------------------------------------------
-  /**
-   * Returns a HyperExpress middleware handler that:
-   *   1. Checks asset version (409 Conflict on mismatch)
-   *   2. Sets Vary: X-Inertia header
-   *   3. Attaches inertia/flash/redirect helpers to the response object
-   */
-  middleware() {
-    return (req, res) => {
-      if (this.version && req.header("X-Inertia") === "true") {
-        const clientVersion = req.header("X-Inertia-Version");
-        if (clientVersion && clientVersion !== this.version) {
-          res.setHeader("X-Inertia-Location", req.url || "/");
-          res.status(409).send();
-          return;
-        }
-      }
-      res.flash = (type, message, ttl = 3e3) => {
-        res.cookie(type, message, ttl);
-        return res;
-      };
-      res.redirect = (url, status = 303) => {
-        return res.status(status).setHeader("Location", url).send();
-      };
-      res.inertia = async (component, inertiaProps = {}) => {
-        return this.render(req, res, component, inertiaProps);
-      };
-    };
   }
   // -----------------------------------------------------------------------
   // Core: Render
@@ -211,17 +182,80 @@ var Inertia = class {
   // -----------------------------------------------------------------------
   /**
    * Render the root HTML page for initial full-page loads.
+   * Uses Inertia v3 format:
+   *   <div id="app"></div>
+   *   <script data-page="app" type="application/json">{page}</script>
+   *   <script type="module" src="..."></script>
    */
   async renderHTML(req, res, page) {
     if (this.renderFunc) {
       return this.renderFunc(req, res, page);
     }
-    const jsonStr = escapeHtml(JSON.stringify(page));
-    const title = extractTitle(page.props);
-    const html = DEFAULT_ROOT_TEMPLATE.replace("%s", title).replace(
-      "%s",
-      jsonStr
+    const pageJSON = JSON.stringify(page);
+    const pageTitle = extractTitle(page.props, this.title);
+    const isDev = !!this.devUrl;
+    const resolveAsset = (file) => {
+      if (isDev) return `${this.devUrl}/${file}`;
+      const entry = this.manifest?.[file];
+      if (!entry) return "/" + file;
+      return "/" + entry.file;
+    };
+    const resolveCss = (file) => {
+      if (isDev) return `${this.devUrl}/${file}`;
+      const entry = this.manifest?.[file];
+      if (entry?.css?.[0]) return "/" + entry.css[0];
+      return "/" + file;
+    };
+    let csrfToken = "";
+    if (this.csrf === true) {
+      csrfToken = req.csrf_token || "";
+    } else if (typeof this.csrf === "function") {
+      csrfToken = this.csrf(req);
+    }
+    const headParts = [
+      '<meta charset="UTF-8">',
+      '<meta name="viewport" content="width=device-width, initial-scale=1.0">'
+    ];
+    headParts.push(`<title>${escapeHtml(pageTitle)}</title>`);
+    if (this.favicon) {
+      headParts.push(
+        `<link rel="icon" type="image/x-icon" href="${escapeHtml(this.favicon)}">`
+      );
+    }
+    if (csrfToken) {
+      headParts.push(
+        `<meta name="csrf-token" content="${escapeHtml(csrfToken)}">`
+      );
+    }
+    if (isDev) {
+      headParts.push(
+        `<script type="module" src="${this.devUrl}/@vite/client"></script>`
+      );
+    }
+    const headHtml = headParts.join("\n		");
+    const bodyParts = [];
+    bodyParts.push('<div id="app"></div>');
+    bodyParts.push(
+      `<script data-page="app" type="application/json">${pageJSON}</script>`
     );
+    if (this.stylesheet) {
+      bodyParts.push(
+        `<link rel="stylesheet" href="${escapeHtml(resolveCss(this.stylesheet))}">`
+      );
+    }
+    bodyParts.push(
+      `<script type="module" src="${escapeHtml(resolveAsset(this.script))}"></script>`
+    );
+    const bodyHtml = bodyParts.join("\n		");
+    const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+		${headHtml}
+</head>
+<body>
+		${bodyHtml}
+</body>
+</html>`;
     res.setHeader(
       "Cache-Control",
       "no-store, no-cache, must-revalidate, private"
@@ -229,6 +263,22 @@ var Inertia = class {
     res.setHeader("Vary", "X-Inertia");
     res.setHeader("Content-Type", "text/html; charset=utf-8");
     return res.send(html);
+  }
+  // -----------------------------------------------------------------------
+  // Flash helper
+  // -----------------------------------------------------------------------
+  /**
+   * Set a flash message cookie (one-time read, 5s TTL).
+   * The cookie is read by the Inertia client on the next request
+   * and passed to the page component as the `flash` prop.
+   *
+   * @example
+   * ```ts
+   * inertia.flash(res, "error", "Invalid credentials");
+   * ```
+   */
+  flash(res, type, message) {
+    res.cookie(type, message, 5e3);
   }
   // -----------------------------------------------------------------------
   // Redirect helpers
@@ -256,12 +306,12 @@ var Inertia = class {
 function escapeHtml(str) {
   return str.replace(/&/g, "&amp;").replace(/'/g, "&#39;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
-function extractTitle(props) {
+function extractTitle(props, fallback = "Inertia") {
   for (const key of ["_title", "title"]) {
     const v = props[key];
     if (typeof v === "string" && v) return v;
   }
-  return "Inertia";
+  return fallback;
 }
 var index_default = Inertia;
 export {

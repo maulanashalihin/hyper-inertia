@@ -76,6 +76,14 @@ export interface SharedProp {
 }
 
 /**
+ * Vite manifest entry for production asset resolution.
+ */
+export interface ViteManifestEntry {
+	file: string;
+	css?: string[];
+}
+
+/**
  * Inertia adapter configuration.
  */
 export interface InertiaConfig {
@@ -102,33 +110,62 @@ export interface InertiaConfig {
 	 *   <script type="module" src="/assets/main.js"></script>
 	 */
 	render?: (req: Request, res: Response, page: Page) => Promise<void> | void;
+
+	// -------------------------------------------------------------------
+	// Built-in template customization
+	// -------------------------------------------------------------------
+
+	/**
+	 * Default page title fallback (when props._title or props.title is absent).
+	 * @default "Inertia"
+	 */
+	title?: string;
+
+	/**
+	 * Favicon href, e.g. "/favicon.ico". Omit for no favicon link.
+	 */
+	favicon?: string;
+
+	/**
+	 * CSRF token. Pass `true` to read from `req.csrf_token`,
+	 * or pass a function to provide a custom value.
+	 */
+	csrf?: boolean | ((req: Request) => string);
+
+	/**
+	 * Vite dev server URL (e.g. "http://localhost:5173").
+	 * When set, the template injects the Vite client and uses
+	 * dev URLs for script/stylesheet instead of production assets.
+	 */
+	devUrl?: string;
+
+	/**
+	 * Vite manifest for production asset resolution.
+	 * Load from `dist/.vite/manifest.json` in production.
+	 * Keys are source files (e.g. "src/app.js"), values contain
+	 * the hashed output `file` and optional `css` array.
+	 */
+	manifest?: Record<string, ViteManifestEntry>;
+
+	/**
+	 * JavaScript entry point (e.g. "src/app.js").
+	 * In dev mode: `{devUrl}/{script}`.
+	 * In production: resolved via `manifest[script].file`.
+	 * @default "/assets/main.js"
+	 */
+	script?: string;
+
+	/**
+	 * Stylesheet entry (e.g. "src/index.css").
+	 * In dev mode: `{devUrl}/{stylesheet}`.
+	 * In production: resolved via `manifest[stylesheet].file` or `manifest[stylesheet].css[0]`.
+	 * Omit for no stylesheet link.
+	 */
+	stylesheet?: string;
 }
 
 // ---------------------------------------------------------------------------
 // Response augmentation for HyperExpress
 // ---------------------------------------------------------------------------
 
-/**
- * Augment HyperExpress Response with Inertia helpers.
- * These are attached by the middleware — TypeScript users import this
- * interface for type augmentation.
- */
-export interface InertiaResponseExtensions {
-	/**
-	 * Render an Inertia page (JSON for XHR, HTML for initial load).
-	 */
-	inertia: (
-		component: string,
-		props?: Record<string, unknown>,
-	) => Promise<unknown>;
 
-	/**
-	 * Set a flash message cookie (one-time read).
-	 */
-	flash: (type: string, message: string, ttl?: number) => Response;
-
-	/**
-	 * Inertia-aware redirect (303 See Other).
-	 */
-	redirect: (url: string, status?: number) => Response;
-}

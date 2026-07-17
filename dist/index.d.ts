@@ -52,6 +52,13 @@ interface SharedProp {
     fn?: (req: Request, res: Response) => unknown;
 }
 /**
+ * Vite manifest entry for production asset resolution.
+ */
+interface ViteManifestEntry {
+    file: string;
+    css?: string[];
+}
+/**
  * Inertia adapter configuration.
  */
 interface InertiaConfig {
@@ -77,25 +84,47 @@ interface InertiaConfig {
      *   <script type="module" src="/assets/main.js"></script>
      */
     render?: (req: Request, res: Response, page: Page) => Promise<void> | void;
-}
-/**
- * Augment HyperExpress Response with Inertia helpers.
- * These are attached by the middleware — TypeScript users import this
- * interface for type augmentation.
- */
-interface InertiaResponseExtensions {
     /**
-     * Render an Inertia page (JSON for XHR, HTML for initial load).
+     * Default page title fallback (when props._title or props.title is absent).
+     * @default "Inertia"
      */
-    inertia: (component: string, props?: Record<string, unknown>) => Promise<unknown>;
+    title?: string;
     /**
-     * Set a flash message cookie (one-time read).
+     * Favicon href, e.g. "/favicon.ico". Omit for no favicon link.
      */
-    flash: (type: string, message: string, ttl?: number) => Response;
+    favicon?: string;
     /**
-     * Inertia-aware redirect (303 See Other).
+     * CSRF token. Pass `true` to read from `req.csrf_token`,
+     * or pass a function to provide a custom value.
      */
-    redirect: (url: string, status?: number) => Response;
+    csrf?: boolean | ((req: Request) => string);
+    /**
+     * Vite dev server URL (e.g. "http://localhost:5173").
+     * When set, the template injects the Vite client and uses
+     * dev URLs for script/stylesheet instead of production assets.
+     */
+    devUrl?: string;
+    /**
+     * Vite manifest for production asset resolution.
+     * Load from `dist/.vite/manifest.json` in production.
+     * Keys are source files (e.g. "src/app.js"), values contain
+     * the hashed output `file` and optional `css` array.
+     */
+    manifest?: Record<string, ViteManifestEntry>;
+    /**
+     * JavaScript entry point (e.g. "src/app.js").
+     * In dev mode: `{devUrl}/{script}`.
+     * In production: resolved via `manifest[script].file`.
+     * @default "/assets/main.js"
+     */
+    script?: string;
+    /**
+     * Stylesheet entry (e.g. "src/index.css").
+     * In dev mode: `{devUrl}/{stylesheet}`.
+     * In production: resolved via `manifest[stylesheet].file` or `manifest[stylesheet].css[0]`.
+     * Omit for no stylesheet link.
+     */
+    stylesheet?: string;
 }
 
 /**
@@ -172,7 +201,7 @@ declare function isPartialRequest(req: Request, component: string): boolean;
 declare function filterPartialProps(props: Record<string, unknown>, req: Request): Record<string, unknown>;
 
 /**
- * @maulanashalihin/hyper-inertia — Inertia.js v3 server-side adapter for HyperExpress.
+ * hyper-express-inertia — Inertia.js v3 server-side adapter for HyperExpress.
  *
  * Implements the Inertia protocol natively on HyperExpress:
  *   - Auto-detects Inertia XHR vs initial full-page loads
@@ -184,12 +213,9 @@ declare function filterPartialProps(props: Record<string, unknown>, req: Request
  *
  * @example
  * ```ts
- * import { Inertia } from "@maulanashalihin/hyper-inertia";
+ * import { Inertia } from "hyper-express-inertia";
  *
  * const inertia = new Inertia({ version: "1.0" });
- *
- * // As middleware
- * server.use(inertia.middleware());
  *
  * // In handlers
  * app.get("/", async (req, res) => {
@@ -202,12 +228,19 @@ declare function filterPartialProps(props: Record<string, unknown>, req: Request
  * Inertia adapter for HyperExpress.
  *
  * Create one via the constructor, register shared props, then use
- * `middleware()` and `render()` in your routes.
+ * `inertia.render()` and `inertia.flash()` in your handlers.
  */
 declare class Inertia {
     private version;
     private renderFunc?;
     private sharedProps;
+    private title;
+    private favicon?;
+    private csrf?;
+    private devUrl?;
+    private manifest?;
+    private script;
+    private stylesheet?;
     constructor(config?: InertiaConfig);
     /**
      * Register a static global prop included in every page render.
@@ -221,13 +254,6 @@ declare class Inertia {
      */
     shareFunc(key: string, fn: (req: Request, res: Response) => unknown): void;
     private removeShared;
-    /**
-     * Returns a HyperExpress middleware handler that:
-     *   1. Checks asset version (409 Conflict on mismatch)
-     *   2. Sets Vary: X-Inertia header
-     *   3. Attaches inertia/flash/redirect helpers to the response object
-     */
-    middleware(): (req: Request, res: Response) => Promise<void> | void;
     /**
      * Send an Inertia-compatible response.
      *
@@ -246,8 +272,23 @@ declare class Inertia {
     private renderJSON;
     /**
      * Render the root HTML page for initial full-page loads.
+     * Uses Inertia v3 format:
+     *   <div id="app"></div>
+     *   <script data-page="app" type="application/json">{page}</script>
+     *   <script type="module" src="..."></script>
      */
     private renderHTML;
+    /**
+     * Set a flash message cookie (one-time read, 5s TTL).
+     * The cookie is read by the Inertia client on the next request
+     * and passed to the page component as the `flash` prop.
+     *
+     * @example
+     * ```ts
+     * inertia.flash(res, "error", "Invalid credentials");
+     * ```
+     */
+    flash(res: Response, type: string, message: string): void;
     /**
      * Internal redirect — 303 See Other for Inertia-aware redirects.
      */
@@ -263,4 +304,4 @@ declare class Inertia {
     back(res: Response, req: Request, defaultUrl?: string): void;
 }
 
-export { Inertia, type InertiaConfig, type InertiaResponseExtensions, type Page, type SharedProp, back, Inertia as default, filterPartialProps, getReferer, isPartialRequest, location, redirect, versionFromEnv, versionFromFile };
+export { Inertia, type InertiaConfig, type Page, type SharedProp, type ViteManifestEntry, back, Inertia as default, filterPartialProps, getReferer, isPartialRequest, location, redirect, versionFromEnv, versionFromFile };
